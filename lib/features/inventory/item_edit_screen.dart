@@ -24,22 +24,25 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   String? _selectedBarcode;
   final _manualBarcodeCtrl = TextEditingController();
   bool _saving = false;
+  final FocusNode _qtyFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _qtyCtrl = TextEditingController(
-      text: _fmtNumber(widget.line.countedQty ?? 0),
-    );
+    _qtyCtrl = TextEditingController(text: _fmtNumber(0));
     _selectedBarcode = widget.line.barcodes.isNotEmpty
         ? widget.line.barcodes.first
         : null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _qtyFocus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _qtyCtrl.dispose();
     _manualBarcodeCtrl.dispose();
+    _qtyFocus.dispose();
     super.dispose();
   }
 
@@ -76,7 +79,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         deltaQty: newDelta,
         barcodes: old.barcodes,
         note: old.note,
-        lastKnownModified: old.lastKnownModified,
+        lastKnownModified: DateTime.now().toIso8601String(),
       );
       final newLines = [...doc.lines];
       newLines[idx] = updatedLine;
@@ -90,11 +93,39 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         version: doc.version,
       );
       await storage.saveDocument(updatedDoc);
+
+      // Try to send change to API immediately, but continue if it fails (delta method)
+      try {
+        await _api.uploadItemsV2(
+          documentId: widget.documentId,
+          items: [
+            {
+              'sku': old.sku,
+              'countedQty': newCounted.toString(),
+              if (old.note != null && old.note!.isNotEmpty) 'note': old.note,
+              'lastKnownModified': updatedLine.lastKnownModified,
+            },
+          ],
+          version: doc.version,
+        );
+      } catch (apiError) {
+        // Log API error but don't fail the operation
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Сохранено локально. ')));
+        }
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
+      // Восстанавливаем фокус после ошибки в delta
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _qtyFocus.requestFocus();
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
@@ -160,7 +191,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         deltaQty: newDelta,
         barcodes: old.barcodes,
         note: old.note,
-        lastKnownModified: old.lastKnownModified,
+        lastKnownModified: DateTime.now().toIso8601String(),
       );
       final newLines = [...doc.lines];
       newLines[idx] = updatedLine;
@@ -175,11 +206,38 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       );
       await storage.saveDocument(updatedDoc);
 
+      // Try to send change to API immediately, but continue if it fails (main method)
+      // try {
+      //   await _api.uploadItemsV2(
+      //     documentId: widget.documentId,
+      //     items: [
+      //       {
+      //         'sku': old.sku,
+      //         'countedQty': newCounted.toString(),
+      //         if (old.note != null && old.note!.isNotEmpty) 'note': old.note,
+      //         'lastKnownModified': updatedLine.lastKnownModified,
+      //       },
+      //     ],
+      //     version: doc.version,
+      //   );
+      // } catch (apiError) {
+      //   // Log API error but don't fail the operation
+      //   if (mounted) {
+      //     ScaffoldMessenger.of(
+      //       context,
+      //     ).showSnackBar(SnackBar(content: Text('Сохранено локально. ')));
+      //   }
+      // }
+
       if (!mounted) return;
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
+      // Восстанавливаем фокус после ошибки в saveImpl
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _qtyFocus.requestFocus();
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
@@ -190,7 +248,17 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   Widget build(BuildContext context) {
     final l = widget.line;
     return Scaffold(
-      appBar: AppBar(title: Text(l.name)),
+      appBar: AppBar(toolbarHeight: 0),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _saving ? null : _saveSet,
+        child: _saving
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.add),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -261,16 +329,24 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
               ),
             const SizedBox(height: 16),
             TextField(
+              focusNode: _qtyFocus,
+              autofocus: true,
               controller: _qtyCtrl,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
+              keyboardType: TextInputType.none,
               decoration: const InputDecoration(
-                labelText: 'Фактическое количество',
+                labelText: 'Добавочное количество',
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _saveSet(),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) {
+                setState(() {});
+                // Восстанавливаем фокус после setState
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && !_qtyFocus.hasFocus) {
+                    _qtyFocus.requestFocus();
+                  }
+                });
+              },
             ),
             const SizedBox(height: 8),
             Row(
@@ -289,20 +365,20 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
               ],
             ),
             const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _saving ? null : _saveSet,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.add),
-                label: const Text('Добавить'),
-              ),
-            ),
+            // SizedBox(
+            //   width: double.infinity,
+            //   child: ElevatedButton.icon(
+            //     onPressed: _saving ? null : _saveSet,
+            //     icon: _saving
+            //         ? const SizedBox(
+            //             width: 16,
+            //             height: 16,
+            //             child: CircularProgressIndicator(strokeWidth: 2),
+            //           )
+            //         : const Icon(Icons.add),
+            //     label: const Text('Добавить'),
+            //   ),
+            // ),
           ],
         ),
       ),

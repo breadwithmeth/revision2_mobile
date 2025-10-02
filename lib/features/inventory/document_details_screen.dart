@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api/inventory_api.dart';
 import 'models/inventory_document_details.dart';
@@ -25,6 +26,8 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
   bool _uploading = false;
   final FocusNode _barcodeFocus = FocusNode();
   String _searchQuery = '';
+  Timer? _uploadTimer;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -33,13 +36,24 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _barcodeFocus.requestFocus();
     });
+    _startPeriodicUpload();
   }
 
   @override
   void dispose() {
     _barcodeCtrl.dispose();
     _barcodeFocus.dispose();
+    _uploadTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _startPeriodicUpload() {
+    _uploadTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && !_uploading) {
+        _onUpload(silent: true);
+      }
+    });
   }
 
   Future<void> _submitBarcode() async {
@@ -118,7 +132,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
               setState(() {
                 _future = _api.getDocumentDetails(widget.documentId);
               });
-              _barcodeFocus.requestFocus();
+              // _barcodeFocus.requestFocus();
             },
             icon: const Icon(Icons.refresh),
             tooltip: 'Обновить',
@@ -165,10 +179,18 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
                             sku.contains(q) ||
                             bcs.contains(q);
                       }).toList();
+
+                // Сортировка по алфавиту (по названию товара)
+                lines.sort(
+                  (a, b) =>
+                      a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+                );
+
                 if (lines.isEmpty) {
                   return const Center(child: Text('Ничего не найдено'));
                 }
                 return ListView.separated(
+                  controller: _scrollController,
                   padding: const EdgeInsets.only(bottom: 8),
                   itemCount: lines.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
@@ -213,7 +235,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
                             _future = Future.value(updated);
                           });
                         }
-                        _barcodeFocus.requestFocus();
+                        // _barcodeFocus.requestFocus();
                       },
                     );
                   },
@@ -229,6 +251,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
                   child: TextField(
                     controller: _barcodeCtrl,
                     focusNode: _barcodeFocus,
+                    keyboardType: TextInputType.none,
                     autofocus: true,
                     decoration: const InputDecoration(
                       labelText: 'Штрихкод',
@@ -264,15 +287,25 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     return _api.getDocumentDetails(widget.documentId);
   }
 
-  Future<void> _onUpload() async {
+  Future<void> _onUpload({bool silent = false}) async {
     setState(() => _uploading = true);
     try {
       final messenger = ScaffoldMessenger.of(context);
       // Take current (possibly locally edited) document from storage
       final storage = InventoryLocalStorage();
-      final doc =
-          await storage.getDocumentById(widget.documentId) ??
-          await _api.getDocumentDetails(widget.documentId);
+      final doc = await storage.getDocumentById(widget.documentId);
+
+      // If no local document found, skip upload (especially for silent mode)
+      if (doc == null) {
+        if (!silent && mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Документ не найден в локальном хранилище'),
+            ),
+          );
+        }
+        return;
+      }
 
       // Build items payload: only countedQty>0
       final items = <Map<String, dynamic>>[];
@@ -290,7 +323,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
       }
 
       if (items.isEmpty) {
-        if (!mounted) return;
+        if (!mounted || silent) return;
         messenger.showSnackBar(
           const SnackBar(content: Text('Нечего выгружать')),
         );
@@ -299,7 +332,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
 
       final resp = await _api.uploadItemsV2(
         documentId: widget.documentId,
-        deviceId: 'TSD-001',
         items: items,
         version: doc.version,
       );
@@ -309,11 +341,15 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
       final conflicts = (resp['conflicts'] as List?)?.length ?? 0;
       final newVersion = resp['version'];
 
-      // Show summary
-      messenger.showSnackBar(
-        SnackBar(content: Text('Выгружено: $applied, конфликтов: $conflicts')),
-      );
-      _barcodeFocus.requestFocus();
+      // Show summary only if not silent
+      if (!silent) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Выгружено: $applied, конфликтов: $conflicts'),
+          ),
+        );
+      }
+      // _barcodeFocus.requestFocus();
 
       // If server returned new version, persist it for future uploads
       if (newVersion is int) {
@@ -326,15 +362,12 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
           version: newVersion,
         );
         await storage.saveDocument(updatedDoc);
-        if (mounted) {
-          setState(() {
-            _future = Future.value(updatedDoc);
-          });
-        }
+        // Don't update _future to avoid rebuilding the list and losing scroll position
+        // The data is already up to date in local storage
       }
 
-      // If there are conflicts, optionally show details
-      if (conflicts > 0) {
+      // If there are conflicts, optionally show details (only if not silent)
+      if (conflicts > 0 && !silent) {
         if (!mounted) return;
         final details = (resp['conflicts'] as List)
             .map((e) => e is Map<String, dynamic> ? e : <String, dynamic>{})
@@ -369,16 +402,16 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
             ],
           ),
         );
-        _barcodeFocus.requestFocus();
+        // _barcodeFocus.requestFocus();
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !silent) {
         final messenger = ScaffoldMessenger.of(context);
         messenger.showSnackBar(SnackBar(content: Text('Ошибка выгрузки: $e')));
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
-      if (mounted) _barcodeFocus.requestFocus();
+      // if (mounted) _barcodeFocus.requestFocus();
     }
   }
 }

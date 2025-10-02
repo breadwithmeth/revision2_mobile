@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/inventory_document.dart';
 import '../models/inventory_document_details.dart';
 import '../storage/local_storage.dart';
@@ -14,6 +16,27 @@ class InventoryApi {
 
   final http.Client _client;
   final String _baseUrl;
+
+  /// Generate or retrieve stored device ID
+  static Future<String> _getDeviceId() async {
+    const key = 'inventory.deviceId';
+    final prefs = await SharedPreferences.getInstance();
+
+    String? stored = prefs.getString(key);
+    if (stored != null && stored.isNotEmpty) {
+      return stored;
+    }
+
+    // Generate new device ID
+    final random = Random();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final randomPart = random.nextInt(99999).toString().padLeft(5, '0');
+    final deviceId = 'TSD-$randomPart-${timestamp.toString().substring(8)}';
+
+    // Store for future use
+    await prefs.setString(key, deviceId);
+    return deviceId;
+  }
 
   /// GET /inventory-documents/warehouse/:warehouseCode
   Future<List<InventoryDocumentSummary>> getDocumentsByWarehouse(
@@ -144,19 +167,50 @@ class InventoryApi {
     }
   }
 
-  /// POST /inventory-documents/:id/items/v2
+  /// PATCH /inventory-documents/:id/items/v2
   /// Upload all counted items with countedQty > 0. Returns response JSON
   /// including conflicts when status 206.
+  ///
+  /// Request format:
+  /// {
+  ///   "version": 1,
+  ///   "deviceId": "TSD-001",
+  ///   "items": [
+  ///     {
+  ///       "sku": "A123",
+  ///       "countedQty": "12.5",
+  ///       "note": "пересчет",
+  ///       "lastKnownModified": "2025-08-20T10:30:00Z"
+  ///     }
+  ///   ]
+  /// }
+  ///
+  /// Response on conflicts (206 Partial Content):
+  /// {
+  ///   "success": true,
+  ///   "version": 2,
+  ///   "appliedChanges": 1,
+  ///   "conflicts": [
+  ///     {
+  ///       "sku": "A123",
+  ///       "field": "countedQty",
+  ///       "yourValue": "12.5",
+  ///       "currentValue": "13.0",
+  ///       "lastModified": "2025-08-20T10:35:00Z",
+  ///       "modifiedBy": "TSD-002"
+  ///     }
+  ///   ]
+  /// }
   Future<Map<String, dynamic>> uploadItemsV2({
     required String documentId,
-    required String deviceId,
+    String? deviceId,
     required List<Map<String, dynamic>> items,
     int? version,
   }) async {
     final uri = Uri.parse('$_baseUrl/inventory-documents/$documentId/items/v2');
     final payload = <String, dynamic>{
       'version': version ?? 1,
-      'deviceId': deviceId,
+      'deviceId': deviceId ?? await _getDeviceId(),
       'items': items,
     };
     print(uri);
