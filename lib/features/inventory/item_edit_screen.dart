@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'api/inventory_api.dart';
 import 'models/inventory_document_details.dart';
 import 'storage/local_storage.dart';
 
@@ -19,12 +18,12 @@ class ItemEditScreen extends StatefulWidget {
 }
 
 class _ItemEditScreenState extends State<ItemEditScreen> {
-  final _api = InventoryApi();
   late TextEditingController _qtyCtrl;
   String? _selectedBarcode;
   final _manualBarcodeCtrl = TextEditingController();
   bool _saving = false;
   final FocusNode _qtyFocus = FocusNode();
+  bool _isAdjustingQty = false;
 
   @override
   void initState() {
@@ -47,16 +46,53 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   }
 
   Future<void> _saveSet() => _saveImpl(additive: true);
+  Future<void> _onEditQuantityPressed() async {
+    final current = widget.line.countedQty ?? 0.0;
+    final controller = TextEditingController(text: _fmtNumber(current));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Изменить количество'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Новое количество',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    final normalized = result.trim().replaceAll(',', '.');
+    final value = double.tryParse(normalized);
+    if (value == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Введите корректное число')));
+      return;
+    }
+    _qtyCtrl.text = value.toString();
+    await _saveImpl(additive: false);
+  }
+
   Future<void> _saveDelta(double delta) async {
     setState(() => _saving = true);
     try {
       final storage = InventoryLocalStorage();
-      var doc = await storage.getDocumentById(widget.documentId);
-      if (doc == null) {
-        final fresh = await _api.getDocumentDetails(widget.documentId);
-        await storage.saveDocument(fresh);
-        doc = await storage.getDocumentById(widget.documentId);
-      }
+      final doc = await storage.getDocumentById(widget.documentId);
       if (doc == null) {
         throw Exception('Не удалось загрузить документ из памяти');
       }
@@ -94,28 +130,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       );
       await storage.saveDocument(updatedDoc);
 
-      // Try to send change to API immediately, but continue if it fails (delta method)
-      try {
-        await _api.uploadItemsV2(
-          documentId: widget.documentId,
-          items: [
-            {
-              'sku': old.sku,
-              'countedQty': newCounted.toString(),
-              if (old.note != null && old.note!.isNotEmpty) 'note': old.note,
-              'lastKnownModified': updatedLine.lastKnownModified,
-            },
-          ],
-          version: doc.version,
-        );
-      } catch (apiError) {
-        // Log API error but don't fail the operation
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Сохранено локально. ')));
-        }
-      }
+      // API вызов убран — работаем только локально, чтобы не блокировать UX
 
       if (!mounted) return;
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
@@ -141,19 +156,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       ).showSnackBar(const SnackBar(content: Text('Введите корректное число')));
       return;
     }
-
-    String? barcode = _selectedBarcode;
-    if ((barcode == null || barcode.isEmpty) &&
-        _manualBarcodeCtrl.text.isNotEmpty) {
-      barcode = _manualBarcodeCtrl.text.trim();
-    }
-
-    if (barcode == null || barcode.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Укажите штрихкод')));
-      return;
-    }
+    // Штрихкод больше не обязателен для сохранения — убрано требование
 
     final prev = widget.line.countedQty ?? 0.0;
     final targetCounted = additive ? (prev + entered) : entered;
@@ -162,13 +165,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     try {
       final storage = InventoryLocalStorage();
       // Ensure we have the document locally
-      var doc = await storage.getDocumentById(widget.documentId);
-      if (doc == null) {
-        // fetch once from API and save if missing
-        final fresh = await _api.getDocumentDetails(widget.documentId);
-        await storage.saveDocument(fresh);
-        doc = await storage.getDocumentById(widget.documentId);
-      }
+      final doc = await storage.getDocumentById(widget.documentId);
       if (doc == null) {
         throw Exception('Не удалось загрузить документ из памяти');
       }
@@ -206,28 +203,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       );
       await storage.saveDocument(updatedDoc);
 
-      // Try to send change to API immediately, but continue if it fails (main method)
-      // try {
-      //   await _api.uploadItemsV2(
-      //     documentId: widget.documentId,
-      //     items: [
-      //       {
-      //         'sku': old.sku,
-      //         'countedQty': newCounted.toString(),
-      //         if (old.note != null && old.note!.isNotEmpty) 'note': old.note,
-      //         'lastKnownModified': updatedLine.lastKnownModified,
-      //       },
-      //     ],
-      //     version: doc.version,
-      //   );
-      // } catch (apiError) {
-      //   // Log API error but don't fail the operation
-      //   if (mounted) {
-      //     ScaffoldMessenger.of(
-      //       context,
-      //     ).showSnackBar(SnackBar(content: Text('Сохранено локально. ')));
-      //   }
-      // }
+      // API вызов намеренно отключен — оффлайн-first сохранение
 
       if (!mounted) return;
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
@@ -247,139 +223,140 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   @override
   Widget build(BuildContext context) {
     final l = widget.line;
-    return Scaffold(
-      appBar: AppBar(toolbarHeight: 0),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _saving ? null : _saveSet,
-        child: _saving
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.add),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Товар: ${l.name}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            Builder(
-              builder: (_) {
-                // final factText = _qtyCtrl.text.trim();
-                // final fact = factText.isEmpty
-                //     ? _fmtNumber(l.countedQty ?? 0)
-                //     : factText;
-                final fact = widget.line.countedQty;
-                return Text(
-                  'Факт: $fact ${l.unit}',
-                  style: const TextStyle(fontSize: 16),
-                );
-              },
-            ),
-            const SizedBox(height: 4),
-            Builder(
-              builder: (_) {
-                final prev = widget.line.countedQty ?? 0.0;
-                final entered = double.tryParse(
-                  _qtyCtrl.text.trim().replaceAll(',', '.'),
-                );
-                final predicted = prev + (entered ?? 0.0);
-                return Text(
-                  'Будет: ${_fmtNumber(predicted)} ${l.unit}',
-                  style: const TextStyle(fontSize: 16, color: Colors.black87),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            Text('SKU: ${l.sku}'),
-            const SizedBox(height: 4),
-            Text('План: ${_fmtNumber(l.qtyFrom1C)} ${l.unit}'),
-            const SizedBox(height: 12),
-            if (l.barcodes.isNotEmpty)
-              Row(
-                children: [
-                  const Text('Штрихкод:'),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedBarcode,
-                      items: l.barcodes
-                          .map(
-                            (b) => DropdownMenuItem(value: b, child: Text(b)),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() => _selectedBarcode = v),
-                    ),
-                  ),
-                ],
-              )
-            else
+    return WillPopScope(
+      onWillPop: () async {
+        // Авто-сохранение перед выходом если введено число и еще не сохранялось
+        if (!_saving) {
+          final text = _qtyCtrl.text.trim();
+          if (text.isNotEmpty && text != '0') {
+            await _saveImpl(additive: true); // добавляем введённое
+            return false; // _saveImpl сам закроет экран
+          }
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(toolbarHeight: 0),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Товар: ${l.name}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Builder(
+                builder: (_) {
+                  // final factText = _qtyCtrl.text.trim();
+                  // final fact = factText.isEmpty
+                  //     ? _fmtNumber(l.countedQty ?? 0)
+                  //     : factText;
+                  final fact = widget.line.countedQty;
+                  return Text(
+                    'Факт: $fact ${l.unit}',
+                    style: const TextStyle(fontSize: 16),
+                  );
+                },
+              ),
+              const SizedBox(height: 4),
+              Builder(
+                builder: (_) {
+                  final prev = widget.line.countedQty ?? 0.0;
+                  final entered = double.tryParse(
+                    _qtyCtrl.text.trim().replaceAll(',', '.'),
+                  );
+                  final predicted = prev + (entered ?? 0.0);
+                  return Text(
+                    'Будет: ${_fmtNumber(predicted)} ${l.unit}',
+                    style: const TextStyle(fontSize: 16, color: Colors.black87),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              Text('SKU: ${l.sku}'),
+              const SizedBox(height: 4),
+              Text('План: ${_fmtNumber(l.qtyFrom1C)} ${l.unit}'),
+              const SizedBox(height: 12),
+              // Блок штрихкода убран из логики сохранения — оставим только если нужен визуально
+              if (l.barcodes.isNotEmpty)
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: l.barcodes
+                      .map(
+                        (b) => ChoiceChip(
+                          label: Text(b),
+                          selected: _selectedBarcode == b,
+                          onSelected: (_) =>
+                              setState(() => _selectedBarcode = b),
+                        ),
+                      )
+                      .toList(),
+                ),
+              const SizedBox(height: 16),
               TextField(
-                controller: _manualBarcodeCtrl,
+                focusNode: _qtyFocus,
+                autofocus: true,
+                controller: _qtyCtrl,
+                keyboardType: TextInputType.none,
                 decoration: const InputDecoration(
-                  labelText: 'Штрихкод',
+                  labelText: 'Добавочное количество',
                   border: OutlineInputBorder(),
                 ),
-              ),
-            const SizedBox(height: 16),
-            TextField(
-              focusNode: _qtyFocus,
-              autofocus: true,
-              controller: _qtyCtrl,
-              keyboardType: TextInputType.none,
-              decoration: const InputDecoration(
-                labelText: 'Добавочное количество',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _saveSet(),
-              onChanged: (_) {
-                setState(() {});
-                // Восстанавливаем фокус после setState
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted && !_qtyFocus.hasFocus) {
-                    _qtyFocus.requestFocus();
+                onSubmitted: (_) => _saveSet(),
+                onChanged: (_) {
+                  if (_isAdjustingQty) return;
+                  final raw = _qtyCtrl.text.trim().replaceAll(',', '.');
+                  final val = double.tryParse(raw);
+                  if (val != null && val > 10000) {
+                    _isAdjustingQty = true;
+                    _qtyCtrl.text = '0';
+                    _qtyCtrl.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _qtyCtrl.text.length),
+                    );
+                    _isAdjustingQty = false;
                   }
-                });
-              },
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : () => _saveDelta(-1),
-                  icon: const Icon(Icons.remove),
-                  label: const Text('-1'),
+                  setState(() {});
+                  // Восстанавливаем фокус после setState
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && !_qtyFocus.hasFocus) {
+                      _qtyFocus.requestFocus();
+                    }
+                  });
+                },
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _saving ? null : () => _saveDelta(-1),
+                    icon: const Icon(Icons.remove),
+                    label: const Text('-1'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _saving ? null : () => _saveDelta(1),
+                    icon: const Icon(Icons.add),
+                    label: const Text('+1'),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _saving ? null : _onEditQuantityPressed,
+                  icon: const Icon(Icons.edit),
+                  label: const Text('Изменить количество'),
                 ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : () => _saveDelta(1),
-                  icon: const Icon(Icons.add),
-                  label: const Text('+1'),
-                ),
-              ],
-            ),
-            const Spacer(),
-            // SizedBox(
-            //   width: double.infinity,
-            //   child: ElevatedButton.icon(
-            //     onPressed: _saving ? null : _saveSet,
-            //     icon: _saving
-            //         ? const SizedBox(
-            //             width: 16,
-            //             height: 16,
-            //             child: CircularProgressIndicator(strokeWidth: 2),
-            //           )
-            //         : const Icon(Icons.add),
-            //     label: const Text('Добавить'),
-            //   ),
-            // ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
