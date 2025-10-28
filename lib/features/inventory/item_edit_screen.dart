@@ -46,6 +46,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   }
 
   Future<void> _saveSet() => _saveImpl(additive: true);
+
   Future<void> _onEditQuantityPressed() async {
     final current = widget.line.countedQty ?? 0.0;
     final controller = TextEditingController(text: _fmtNumber(current));
@@ -242,117 +243,220 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Товар: ${l.name}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
+              // Header Card
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Builder(
-                builder: (_) {
-                  // final factText = _qtyCtrl.text.trim();
-                  // final fact = factText.isEmpty
-                  //     ? _fmtNumber(l.countedQty ?? 0)
-                  //     : factText;
-                  final fact = widget.line.countedQty;
-                  return Text(
-                    'Факт: $fact ${l.unit}',
-                    style: const TextStyle(fontSize: 16),
-                  );
-                },
-              ),
-              const SizedBox(height: 4),
-              Builder(
-                builder: (_) {
-                  final prev = widget.line.countedQty ?? 0.0;
-                  final entered = double.tryParse(
-                    _qtyCtrl.text.trim().replaceAll(',', '.'),
-                  );
-                  final predicted = prev + (entered ?? 0.0);
-                  return Text(
-                    'Будет: ${_fmtNumber(predicted)} ${l.unit}',
-                    style: const TextStyle(fontSize: 16, color: Colors.black87),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              Text('SKU: ${l.sku}'),
-              const SizedBox(height: 4),
-              Text('План: ${_fmtNumber(l.qtyFrom1C)} ${l.unit}'),
-              const SizedBox(height: 12),
-              // Блок штрихкода убран из логики сохранения — оставим только если нужен визуально
-              if (l.barcodes.isNotEmpty)
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: l.barcodes
-                      .map(
-                        (b) => ChoiceChip(
-                          label: Text(b),
-                          selected: _selectedBarcode == b,
-                          onSelected: (_) =>
-                              setState(() => _selectedBarcode = b),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
                         ),
-                      )
-                      .toList(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Builder(
+                            builder: (_) {
+                              final fact = widget.line.countedQty;
+                              return Text(
+                                'Факт: ${_fmtNumber((fact ?? 0))} ${l.unit}',
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          Builder(
+                            builder: (_) {
+                              final prev = widget.line.countedQty ?? 0.0;
+                              final entered = double.tryParse(
+                                _qtyCtrl.text.trim().replaceAll(',', '.'),
+                              );
+                              final predicted = prev + (entered ?? 0.0);
+                              return Text(
+                                'Будет: ${_fmtNumber(predicted)} ${l.unit}',
+                                style: const TextStyle(color: Colors.black87),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'SKU: ${l.sku}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'План: ${_fmtNumber(l.qtyFrom1C)} ${l.unit}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.black54,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (l.barcodes.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: l.barcodes
+                              .map(
+                                (b) => ChoiceChip(
+                                  label: Text(b),
+                                  selected: _selectedBarcode == b,
+                                  onSelected: (_) =>
+                                      setState(() => _selectedBarcode = b),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              const SizedBox(height: 16),
-              TextField(
-                focusNode: _qtyFocus,
-                autofocus: true,
-                controller: _qtyCtrl,
-                keyboardType: TextInputType.none,
-                decoration: const InputDecoration(
-                  labelText: 'Добавочное количество',
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _saveSet(),
-                onChanged: (_) {
-                  if (_isAdjustingQty) return;
-                  final raw = _qtyCtrl.text.trim().replaceAll(',', '.');
-                  final val = double.tryParse(raw);
-                  if (val != null && val > 10000) {
-                    _isAdjustingQty = true;
-                    _qtyCtrl.text = '0';
-                    _qtyCtrl.selection = TextSelection.fromPosition(
-                      TextPosition(offset: _qtyCtrl.text.length),
-                    );
-                    _isAdjustingQty = false;
-                  }
-                  setState(() {});
-                  // Восстанавливаем фокус после setState
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted && !_qtyFocus.hasFocus) {
-                      _qtyFocus.requestFocus();
-                    }
-                  });
-                },
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _saving ? null : () => _saveDelta(-1),
-                    icon: const Icon(Icons.remove),
-                    label: const Text('-1'),
+              const SizedBox(height: 12),
+              // Quantity Card
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    children: [
+                      TextField(
+                        focusNode: _qtyFocus,
+                        autofocus: true,
+                        controller: _qtyCtrl,
+                        keyboardType: TextInputType.none,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Добавочное количество',
+                          suffixText: l.unit,
+                          filled: true,
+                          fillColor: Theme.of(
+                            context,
+                          ).colorScheme.surfaceVariant.withOpacity(0.4),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 14,
+                          ),
+                        ),
+                        onSubmitted: (_) => _saveSet(),
+                        onChanged: (_) {
+                          if (_isAdjustingQty) return;
+                          final raw = _qtyCtrl.text.trim().replaceAll(',', '.');
+                          final val = double.tryParse(raw);
+                          if (val != null && val > 10000) {
+                            _isAdjustingQty = true;
+                            _qtyCtrl.text = '0';
+                            _qtyCtrl.selection = TextSelection.fromPosition(
+                              TextPosition(offset: _qtyCtrl.text.length),
+                            );
+                            _isAdjustingQty = false;
+                          }
+                          setState(() {});
+                          // Восстанавливаем фокус после setState
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && !_qtyFocus.hasFocus) {
+                              _qtyFocus.requestFocus();
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _saving ? null : () => _saveDelta(-1),
+                              icon: const Icon(Icons.remove),
+                              label: const Text('-1'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _saving ? null : () => _saveDelta(1),
+                              icon: const Icon(Icons.add),
+                              label: const Text('+1'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _saving ? null : () => _saveDelta(1),
-                    icon: const Icon(Icons.add),
-                    label: const Text('+1'),
-                  ),
-                ],
+                ),
               ),
               const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _saving ? null : _onEditQuantityPressed,
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Изменить количество'),
+              SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _saving ? null : _onEditQuantityPressed,
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Изменить количество'),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],

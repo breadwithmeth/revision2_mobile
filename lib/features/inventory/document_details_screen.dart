@@ -143,13 +143,32 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            child: TextField(
-              decoration: const InputDecoration(
-                labelText: 'Поиск по строкам (название, SKU, ШК)',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
+            child: Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-              onChanged: (v) => setState(() => _searchQuery = v),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Поиск по строкам (название, SKU, ШК)',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceVariant.withOpacity(0.4),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                ),
+              ),
             ),
           ),
           Expanded(
@@ -191,83 +210,146 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
                 }
                 return ListView.separated(
                   controller: _scrollController,
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
                   itemCount: lines.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
                     final line = lines[i];
                     final primaryBc = line.barcodes.isNotEmpty
                         ? line.barcodes.first
                         : null;
                     final counted = line.countedQty ?? 0;
-                    return ListTile(
-                      title: Text(line.name),
-                      subtitle: Text(
-                        'SKU: ${line.sku}${primaryBc != null ? ' • ШК: $primaryBc' : ''}',
+                    final delta = line.deltaQty;
+                    final Color? deltaColor = delta == null
+                        ? null
+                        : delta > 0
+                        ? Colors.green
+                        : delta < 0
+                        ? Colors.red
+                        : Colors.grey;
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${_fmt(counted)} / ${_fmt(line.qtyFrom1C)} ${line.unit}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          if (line.deltaQty != null)
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        leading: CircleAvatar(
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                          child: const Icon(Icons.inventory_2_outlined),
+                        ),
+                        title: Text(
+                          line.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          'SKU: ${line.sku}${primaryBc != null ? ' • ШК: $primaryBc' : ''}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
                             Text(
-                              'Δ ${_fmt(line.deltaQty!)}',
-                              style: const TextStyle(fontSize: 12),
+                              '${_fmt(counted)} / ${_fmt(line.qtyFrom1C)} ${line.unit}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                        ],
+                            if (delta != null)
+                              Text(
+                                'Δ ${_fmt(delta)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: deltaColor,
+                                ),
+                              ),
+                          ],
+                        ),
+                        onTap: () async {
+                          final updated = await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ItemEditScreen(
+                                documentId: widget.documentId,
+                                line: line,
+                              ),
+                            ),
+                          );
+                          if (updated is InventoryDocumentDetails) {
+                            if (!mounted) return;
+                            setState(() {
+                              _future = Future.value(updated);
+                            });
+                          }
+                        },
                       ),
-                      onTap: () async {
-                        final updated = await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ItemEditScreen(
-                              documentId: widget.documentId,
-                              line: line,
-                            ),
-                          ),
-                        );
-                        if (updated is InventoryDocumentDetails) {
-                          if (!mounted) return;
-                          setState(() {
-                            _future = Future.value(updated);
-                          });
-                        }
-                        // _barcodeFocus.requestFocus();
-                      },
                     );
                   },
                 );
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _barcodeCtrl,
-                    focusNode: _barcodeFocus,
-                    keyboardType: TextInputType.none,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Штрихкод',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _submitBarcode(),
-                    textInputAction: TextInputAction.done,
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _barcodeCtrl,
+                          focusNode: _barcodeFocus,
+                          keyboardType: TextInputType.none,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            labelText: 'Штрихкод',
+                            filled: true,
+                            fillColor: Theme.of(
+                              context,
+                            ).colorScheme.surfaceVariant.withOpacity(0.4),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                          ),
+                          onSubmitted: (_) => _submitBarcode(),
+                          textInputAction: TextInputAction.done,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        onPressed: _submitBarcode,
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Открыть'),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(120, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: _submitBarcode,
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Открыть'),
-                ),
-              ],
+              ),
             ),
           ),
         ],
