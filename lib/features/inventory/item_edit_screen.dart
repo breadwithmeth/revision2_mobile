@@ -134,6 +134,13 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       // API вызов убран — работаем только локально, чтобы не блокировать UX
 
       if (!mounted) return;
+      // Показать уведомление об успешном изменении количества
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Количество изменено'),
+          duration: Duration(seconds: 1),
+        ),
+      );
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
     } catch (e) {
       if (!mounted) return;
@@ -207,6 +214,13 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       // API вызов намеренно отключен — оффлайн-first сохранение
 
       if (!mounted) return;
+      // Показать уведомление об успешном изменении количества
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Количество изменено'),
+          duration: Duration(seconds: 1),
+        ),
+      );
       Navigator.of(context).pop<InventoryDocumentDetails>(updatedDoc);
     } catch (e) {
       if (!mounted) return;

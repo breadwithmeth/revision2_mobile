@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/inventory_document.dart';
 import '../models/inventory_document_details.dart';
 import '../storage/local_storage.dart';
@@ -19,23 +17,8 @@ class InventoryApi {
 
   /// Generate or retrieve stored device ID
   static Future<String> _getDeviceId() async {
-    const key = 'inventory.deviceId';
-    final prefs = await SharedPreferences.getInstance();
-
-    String? stored = prefs.getString(key);
-    if (stored != null && stored.isNotEmpty) {
-      return stored;
-    }
-
-    // Generate new device ID
-    final random = Random();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final randomPart = random.nextInt(99999).toString().padLeft(5, '0');
-    final deviceId = 'TSD-$randomPart-${timestamp.toString().substring(8)}';
-
-    // Store for future use
-    await prefs.setString(key, deviceId);
-    return deviceId;
+    // Use SQLite-backed storage (kv table) instead of SharedPreferences
+    return InventoryLocalStorage.getOrCreateDeviceId();
   }
 
   /// GET /inventory-documents/warehouse/:warehouseCode

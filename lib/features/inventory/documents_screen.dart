@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'api/inventory_api.dart';
 import 'models/inventory_document.dart';
 import 'document_details_screen.dart';
-import 'models/warehouse.dart';
 import 'storage/local_storage.dart';
+import 'saved_documents_screen.dart';
+import 'warehouse_select_screen.dart';
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
@@ -17,15 +18,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   final _api = InventoryApi();
   Future<List<InventoryDocumentSummary>>? _future;
   List<InventoryDocumentSummary> _saved = const [];
-  bool _savedExpanded = true;
-  Future<List<Warehouse>>? _warehousesFuture;
   String? _selectedWarehouseCode;
+  String? _selectedWarehouseName;
 
   @override
   void initState() {
     super.initState();
     _loadSaved();
-    _warehousesFuture = _api.getWarehouses();
   }
 
   Future<void> _loadSaved() async {
@@ -67,255 +66,67 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // Warehouses section
-            FutureBuilder<List<Warehouse>>(
-              future: _warehousesFuture,
-              builder: (context, snap) {
-                Widget inner;
-                if (snap.connectionState == ConnectionState.waiting) {
-                  inner = const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8.0),
-                    child: LinearProgressIndicator(),
-                  );
-                } else if (snap.hasError) {
-                  inner = Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Text(
-                      'Ошибка складов: ${snap.error}',
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                  );
-                } else {
-                  final warehouses = snap.data ?? const <Warehouse>[];
-                  if (warehouses.isEmpty) {
-                    inner = const SizedBox.shrink();
-                  } else {
-                    final items = warehouses
-                        .map(
-                          (w) => DropdownMenuItem<String>(
-                            value: w.code,
-                            child: Text(
-                              w.name == null || w.name!.isEmpty
-                                  ? w.code
-                                  : '${w.code} — ${w.name}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList();
-                    _selectedWarehouseCode ??=
-                        _controller.text.trim().isNotEmpty
-                        ? _controller.text.trim()
-                        : warehouses.first.code;
-
-                    inner = Row(
-                      children: [
-                        const Icon(Icons.warehouse_outlined, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: _selectedWarehouseCode,
-                            items: items,
-                            isExpanded: true,
-                            decoration: InputDecoration(
-                              labelText: 'Склад',
-                              filled: true,
-                              fillColor: Theme.of(
-                                context,
-                              ).colorScheme.surfaceVariant.withOpacity(0.4),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 12,
-                              ),
-                            ),
-                            selectedItemBuilder: (_) => warehouses
-                                .map(
-                                  (w) => Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text(
-                                      (w.name == null || w.name!.isEmpty)
-                                          ? w.code
-                                          : '${w.code} — ${w.name}',
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) {
-                              setState(() {
-                                _selectedWarehouseCode = v;
-                                if (v != null) _controller.text = v;
-                              });
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton.filledTonal(
-                          tooltip: 'Обновить склады',
-                          onPressed: () => setState(() {
-                            _warehousesFuture = _api.getWarehouses();
-                          }),
-                          icon: const Icon(Icons.refresh),
-                        ),
-                      ],
-                    );
-                  }
-                }
-
-                return Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: inner,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            // Saved documents
+            // Warehouse pick button
             Card(
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.bookmark_outline, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Сохранённые документы',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        IconButton.filledTonal(
-                          tooltip: 'Обновить',
-                          onPressed: _loadSaved,
-                          icon: const Icon(Icons.refresh),
-                        ),
-                        IconButton(
-                          tooltip: _savedExpanded ? 'Свернуть' : 'Развернуть',
-                          onPressed: () =>
-                              setState(() => _savedExpanded = !_savedExpanded),
-                          icon: Icon(
-                            _savedExpanded
-                                ? Icons.expand_less
-                                : Icons.expand_more,
-                          ),
-                        ),
-                      ],
-                    ),
-                    AnimatedCrossFade(
-                      crossFadeState: _savedExpanded
-                          ? CrossFadeState.showFirst
-                          : CrossFadeState.showSecond,
-                      duration: const Duration(milliseconds: 200),
-                      firstChild: SizedBox(
-                        height: 150,
-                        child: _saved.isEmpty
-                            ? const Center(
-                                child: Text('Нет сохранённых документов'),
-                              )
-                            : ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: _saved.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 12),
-                                itemBuilder: (context, i) {
-                                  final d = _saved[i];
-                                  return SizedBox(
-                                    width: 260,
-                                    child: Card(
-                                      clipBehavior: Clip.antiAlias,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: InkWell(
-                                        onTap: () {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  DocumentDetailsScreen(
-                                                    documentId: d.id,
-                                                    title:
-                                                        'Документ №${d.number}',
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(12),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.description_outlined,
-                                                    size: 18,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Expanded(
-                                                    child: Text(
-                                                      '№ ${d.number}',
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: const TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Text('Склад: ${d.warehouseCode}'),
-                                              const Spacer(),
-                                              Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.list_alt_outlined,
-                                                    size: 16,
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    'Строк: ${d.linesCount}',
-                                                  ),
-                                                  const Spacer(),
-                                                  Text(
-                                                    _fmtDate(d.createdAt),
-                                                    style: const TextStyle(
-                                                      fontSize: 12,
-                                                      color: Colors.grey,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                      secondChild: const SizedBox.shrink(),
-                    ),
-                  ],
+              child: ListTile(
+                leading: const Icon(Icons.warehouse_outlined),
+                title: const Text('Склад'),
+                subtitle: Text(
+                  _selectedWarehouseCode == null
+                      ? 'Не выбран'
+                      : _selectedWarehouseName == null ||
+                            _selectedWarehouseName!.isEmpty
+                      ? _selectedWarehouseCode!
+                      : '${_selectedWarehouseCode!} — ${_selectedWarehouseName!}',
                 ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final selected = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const WarehouseSelectScreen(),
+                    ),
+                  );
+                  if (!mounted) return;
+                  if (selected != null) {
+                    setState(() {
+                      _selectedWarehouseCode =
+                          selected.code as String? ?? selected.code;
+                      _selectedWarehouseName = selected.name as String?;
+                      _controller.text = _selectedWarehouseCode ?? '';
+                    });
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Saved documents button
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                leading: const Icon(Icons.bookmark_outline),
+                title: const Text('Сохранённые документы'),
+                subtitle: Text(
+                  _saved.isEmpty
+                      ? 'Нет сохранённых'
+                      : 'Количество: ${_saved.length}',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SavedDocumentsScreen(),
+                    ),
+                  );
+                  if (!mounted) return;
+                  await _loadSaved();
+                },
               ),
             ),
             const SizedBox(height: 8),
